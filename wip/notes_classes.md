@@ -6,3 +6,10 @@
         changer content.row pour content.contents ?
 
         stop at ligne 270, mercredi 28 octobre 2020
+        
+        
+# 4 avril 2021
+
+ stop at ligne 352, fonction Screen.refresh()
+ 
+ ce qu'il faut, c'est que Kernel soit dans le __init__ de Config, je pense

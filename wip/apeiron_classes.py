@@ -199,7 +199,7 @@ class ERow():
         self.size = size
         self.rsize = 0
         self.chars = chars
-        self.render = '
+        self.render = ''
 
 class Screen():
     def __init__(self, rows, cols):
@@ -291,7 +291,7 @@ class Screen():
                 buflen += 1
     
     def move_cursor(self, key):
-        e = self.edit
+        e = self.pick_content()
         row = ERow()
         row.chars = e.row[e.cy].chars if (e.cy < e.numrows) else ""
         row.size = e.row[e.cy].size if e.cy < e.numrows else 0
@@ -330,13 +330,111 @@ class Screen():
             e.cx = rowlen
 
     def refresh(self):
-        pass
+        buff = Buffer()
+        self.scroll()
+        buff.append('\x1b[?25l', 6)
+        buff.append('\x1b[H', 3)
+        
+        append_mode(buff)
+        draw_message_bar()
+        
+        if self.current_mode == MODE_EDITOR or self.current_mode == MODE_DIR:
+            buf = "\x1b[" + str(self.cy + 1 - self.rowoff) + ";" + \
+                str(self.cx + 1 - self.coloff) + "H"   
+            bufsize = sys.getsizeof(buf)
+            buff.append(buf,bufsize)
+        
+        buff.append('\x1b[?25h', 6)
 
+        temp = ""
+        for elem in (buff.b):
+            temp = temp + elem
+        # 4 avril 2021
+        os.write(super(fd, bytes(temp, encoding="utf-8"))
+        abuffer.free()
+
+    
+    def append_mode(self,buff):
+        if self.current_mode == MODE_DIR:
+            nb_elem = 0
+            for f in self.dir:
+                buff.append(f, len(f))
+                buff.append("\x1b[K", 3)
+                buff.append("\r\n", 2)
+                nb_elem += 1
+                if nb_elem == self.screenrows:
+                    break
+        
+        elif self.current_mode == MODE_EDIT:
+
+            for y in range(self.screenrows):
+                filerow = y + self.rowoff
+                if filerow >= self.edit.numrows:
+                    if self.edit.numrows == 0 and y == self.screenrows/3:
+                        welcome = "Bienvenue sur Apeiron, version " + APEIRON_VERSION
+                        welcomelen = sys.getsizeof(welcome)
+                        if welcomelen > self.screencols:
+                            welcomelen = self.screencols
+                        buff.append(welcome, welcomelen)
+                    else:
+                        buff.append("~", 1)
+                else:
+                    ln = self.edit.row[filerow].rsize - e.coloff
+                    if ln < 0:
+                        ln = 0
+                    if ln > e.screencols:
+                        ln = e.screencols
+                    abuffer.append(self.edit.row[filerow].render, ln)
+                buff.append("\x1b[K", 3)
+                buff.append('\r\n', 2)
+            draw_status_bar()
+        
+        elif self.current_mode == MODE_FOCUS:
+            buff.append(self.focus.focus_on, len(self.focus.focus_on)-1)
+            buff.append("\x1b[K", 3)
+            buff.append("\r\n", 2)
+            buff.append("\x1b[K", 3)
+            buff.append("\r\n", 2)
+            draw_status_bar()
+
+        
+    def draw_status_bar(self,buff):
+        buff.append("\x1b[7m", 4)
+        status = self.filename
+        if self.edit.dirty > 0:
+            status = status + " (modified)"
+
+        if self.current_mode == MODE_FOCUS:
+            status = " APEIRON : appuyez sur Ctrl-D pour revenir en mode éditeur."
+
+        ln = len(status)
+        
+        if ln > self.screencols:
+            ln = self.screencols
+        buff.append(status, ln)
+        while ln < self.screencols:
+            buff.append(" ", 1)
+            ln = ln + 1
+        buff.append("\x1b[m", 3)
+        buff.append("\r\n", 2)
+
+
+
+    def draw_message_bar(self,buff):
+        buff.append("\x1b[K", 3)
+        msgln = len(self.pick_content.statusmsg)
+        if msgln > self.screencols:
+            msgln = self.screencols
+        if msgln and time.time() - self.pick_content.statusmsg_time < 5:
+            buff.append(self.pick_content.statusmsg, msgln)
+
+        
 
 class Kernel():
-    def __init__(self):
-        self.screen = Screen()
+    def __init__(self,rows,cols,conf):
+        self.screen = Screen(rows,cols)
         self.start_time = time.time()
+        self.conf = conf
 
     def autosave(self):
         current = str(time.time())
@@ -353,7 +451,7 @@ class Kernel():
     def delete_temp_files(self):
         list_temp_dir = os.listdir(TEMP_FOLDER)
         for file in list_temp_dir:
-            timed = file(len(TEMP_FILENAME)+1: -4)
+            timed = file[len(TEMP_FILENAME)+1:-4]
             if float(timed) > self.start_time:
                 os.remove(TEMP_FOLDER + file)
     
@@ -525,4 +623,8 @@ if __name__ == "__main__":
         conf = Config()
         conf.enable_raw_mode()
         hw = get_window_size()
-        krnl = Kernel()
+        krnl = Kernel(hw[0],hw[1])
+        
+    except:
+        conf.disable_raw_mode()
+        raise
