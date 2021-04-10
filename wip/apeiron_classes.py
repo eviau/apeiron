@@ -35,38 +35,40 @@ TEMP_FILENAME = "temp"
 PATH_AGENDA = "agenda/"
 
 
-class Config():
-    def __init__(self):
-        self.fd = ""
-        self.atexit = ""
+APEIRON_VERSION = "0.0.1"
 
-    def enable_raw_mode(self):
-        self.fd = sys.stdin.fileno()
-        self.atexit = termios.tcgetattr(self.fd)
-        new = termios.tcgetattr(self.fd)
-        new[0] = new[0] & ~(termios.BRKINT | termios.ICRNL |
-                            termios.INPCK | termios.ISTRIP | termios.IXON)
-        new[1] = new[1] & ~(termios.OPOST)
-        new[2] = new[2] | termios.CS8
-        new[3] = new[3] & ~(termios.ECHO | termios.ICANON |
-                            termios.IEXTEN | termios.ISIG)
-        new[6][termios.VMIN] = 0
-        new[6][termios.VTIME] = 1
+BACKSPACE = "\x7f"
 
-        termios.tcsetattr(self.fd, termios.TCSAFLUSH, new)
+ARROW_LEFT = 1000
+ARROW_RIGHT = 1001
+ARROW_UP = 1002
+ARROW_DOWN = 1003
+PAGE_UP = 1004
+PAGE_DOWN = 1005
+DEL_KEY = 1006
 
-    def disable_raw_mode(self):
-        termios.tcsetattr(self.fd, termios.TCSAFLUSH, self.atexit)
+ENTER = 13
+
+ESC = 27
+
+TEMP_FOLDER = "temp_saved_files/"
+
+TEMP_FILENAME = "temp"
+
+logfile = None
+
+PATH_AGENDA = "agenda/"
+
 
 
 class Content():
-    def __init__(self, mode=MODE_EDIT):
+    def __init__(self, mode=MODE_EDIT,dir=list()):
         self.cx = 0
         self.cy = 0
         self.numrows = 0
         # could merge these three
         self.row = list()
-        self.dir = list()
+        self.dir = dir
         self.focus_on = ""
         # not sure about rowoff and coloff - pense pas que ce soit
         # nécessaire de les avoir pour content()
@@ -207,14 +209,33 @@ class Screen():
         self.screencols = cols
         self.cx = 0
         self.cy = 0
-        self.current_mode = MODE_DIR
-        self.dir = Content()
+        self.current_mode = MODE_EDIT
+        self.dir = Content(dir=sorted(os.listdir(PATH_AGENDA)))
         self.focus = Content()
         self.edit = Content()
         self.rowoff = 0
         self.coloff = 0
         self.filename = ""
+        self.fd = ""
+        self.atexit = ""
+        
+    def enable_raw_mode(self):
+        self.fd = sys.stdin.fileno()
+        self.atexit = termios.tcgetattr(self.fd)
+        new = termios.tcgetattr(self.fd)
+        new[0] = new[0] & ~(termios.BRKINT | termios.ICRNL |
+                            termios.INPCK | termios.ISTRIP | termios.IXON)
+        new[1] = new[1] & ~(termios.OPOST)
+        new[2] = new[2] | termios.CS8
+        new[3] = new[3] & ~(termios.ECHO | termios.ICANON |
+                            termios.IEXTEN | termios.ISIG)
+        new[6][termios.VMIN] = 0
+        new[6][termios.VTIME] = 1
 
+        termios.tcsetattr(self.fd, termios.TCSAFLUSH, new)
+
+    def disable_raw_mode(self):
+        termios.tcsetattr(self.fd, termios.TCSAFLUSH, self.atexit)
 
     def pick_content(self):
         if self.current_mode == MODE_DIR:
@@ -228,22 +249,25 @@ class Screen():
         self.current_mode = (self.current_mode + 1) % 3
         if self.current_mode == MODE_DIR:
             os.system(
-                "wmctrl -r ' ~/dev/perso/apeiron' -e 0,50,50,786,527")
+                "wmctrl -r 'edith@hal: ~/dev/gh/apeiron/wip' -e 0,50,50,786,527")
             self.dir.set_status_message("Mode RÉPERTOIRE")
         elif self.current_mode == MODE_FOCUS:
             os.system(
-                "wmctrl -r ' ~/dev/perso/apeiron' -e 0,50,50,800,50")
-            os.system("wmctrl -r ' ~/dev/perso/apeiron' -b add,above")
+                "wmctrl -r ' ~/dev/gh/apeiron/wip' -e 0,50,50,800,50")
+            os.system("wmctrl -r ' ~/dev/gh/apeiron/wip' -b add,above")
             self.focus.set_status_message("Mode FOCUS")
-            if len(self.focus.row[self.focus.cy].chars) == 0:
+            log('self.edit.dir[self.edit.cy]')
+            log(self.edit.dir)
+            log(self.edit.cy)
+            if self.edit.row[self.edit.cy].size == 0:
                 self.focus.focus_on = "Aucune tâche en cours."
             else:
-                self.focus.focus_on = self.focus.row[self.focus.cy].render
+                self.focus.focus_on = self.edit.row[self.edit.cy].render
         elif self.current_mode == MODE_EDIT:
             os.system(
-                "wmctrl -r ' ~/dev/perso/apeiron' -b remove,above")
+                "wmctrl -r ' ~/dev/gh/apeiron/wip' -b remove,above")
             os.system(
-                "wmctrl -r ' ~/dev/perso/apeiron' -e 0,50,50,786,527")
+                "wmctrl -r ' ~/dev/gh/apeiron/wip' -e 0,50,50,786,527")
             self.edit.set_status_message(DEFAULT_STATUS_MSG)
 
     def scroll(self):
@@ -272,9 +296,9 @@ class Screen():
             current_content = self.pick_content()
             current_content.set_status_message(prompt + buf + '\0')
             self.refresh()
-            c = Keyboard.read_key()
+            c = read_key()
             while c == '':
-                c = Keyboard.read_key()
+                c = read_key()
             if c == DEL_KEY or c == BACKSPACE:
                 if buflen > 0:
                     buflen -= 1
@@ -309,20 +333,20 @@ class Screen():
                 e.cy = e.cy + 1
                 e.cx = 0
         elif key == ARROW_UP:
-            if e.mode_editor == 0:
+            if self.current_mode == MODE_EDIT:
                 if (e.cy != 0):
                     e.cy = e.cy - 1
-            elif e.mode_editor == 1:    
-                if e.dir_cy > 0:
-                    e.dir_cy = e.dir_cy - 1
+            elif self.current_mode == MODE_FOCUS:    
+                if self.focus.cy > 0:
+                    self.focus.cy = self.focus.cy - 1
         elif key == ARROW_DOWN:
             log("e.cx, e.cy : ", e.cx, e.cy)
-            if e.mode_editor == 0:
+            if self.current_mode == MODE_EDIT:
                 if (e.cy < e.numrows):
                     e.cy = e.cy + 1
-            elif e.mode_editor == 1:
-                if e.dir_cy < len(e.dir):
-                    e.dir_cy = e.dir_cy + 1
+            elif self.current_mode == MODE_DIR:
+                if self.dir.cy < len(self.dir.dir):
+                    self.dir.cy = self.dir.cy + 1
         row.chars = e.row[e.cy].chars if (e.cy < e.numrows) else ""
         row.size = e.row[e.cy].size if e.cy < e.numrows else 0
         rowlen = 0 if row.size <= 0 else row.size
@@ -335,10 +359,10 @@ class Screen():
         buff.append('\x1b[?25l', 6)
         buff.append('\x1b[H', 3)
         
-        append_mode(buff)
-        draw_message_bar()
+        self.append_mode(buff)
+        self.draw_message_bar(buff)
         
-        if self.current_mode == MODE_EDITOR or self.current_mode == MODE_DIR:
+        if self.current_mode == MODE_EDIT or self.current_mode == MODE_DIR:
             buf = "\x1b[" + str(self.cy + 1 - self.rowoff) + ";" + \
                 str(self.cx + 1 - self.coloff) + "H"   
             bufsize = sys.getsizeof(buf)
@@ -349,15 +373,14 @@ class Screen():
         temp = ""
         for elem in (buff.b):
             temp = temp + elem
-        # 4 avril 2021
-        os.write(super(fd, bytes(temp, encoding="utf-8"))
-        abuffer.free()
-
+        # 4 avril 2021 - 10 avril 2021 : move the Config class to the Screen class
+        os.write(self.fd, bytes(temp, encoding="utf-8"))
+        buff.free()
     
     def append_mode(self,buff):
         if self.current_mode == MODE_DIR:
             nb_elem = 0
-            for f in self.dir:
+            for f in self.dir.dir:
                 buff.append(f, len(f))
                 buff.append("\x1b[K", 3)
                 buff.append("\r\n", 2)
@@ -379,15 +402,15 @@ class Screen():
                     else:
                         buff.append("~", 1)
                 else:
-                    ln = self.edit.row[filerow].rsize - e.coloff
+                    ln = self.edit.row[filerow].rsize - self.coloff
                     if ln < 0:
                         ln = 0
-                    if ln > e.screencols:
-                        ln = e.screencols
-                    abuffer.append(self.edit.row[filerow].render, ln)
+                    if ln > self.screencols:
+                        ln = self.screencols
+                    buff.append(self.edit.row[filerow].render, ln)
                 buff.append("\x1b[K", 3)
                 buff.append('\r\n', 2)
-            draw_status_bar()
+            self.draw_status_bar(buff)
         
         elif self.current_mode == MODE_FOCUS:
             buff.append(self.focus.focus_on, len(self.focus.focus_on)-1)
@@ -395,9 +418,8 @@ class Screen():
             buff.append("\r\n", 2)
             buff.append("\x1b[K", 3)
             buff.append("\r\n", 2)
-            draw_status_bar()
-
-        
+            self.draw_status_bar(buff)
+  
     def draw_status_bar(self,buff):
         buff.append("\x1b[7m", 4)
         status = self.filename
@@ -418,23 +440,18 @@ class Screen():
         buff.append("\x1b[m", 3)
         buff.append("\r\n", 2)
 
-
-
     def draw_message_bar(self,buff):
         buff.append("\x1b[K", 3)
-        msgln = len(self.pick_content.statusmsg)
+        msgln = len(self.pick_content().statusmsg)
         if msgln > self.screencols:
             msgln = self.screencols
-        if msgln and time.time() - self.pick_content.statusmsg_time < 5:
-            buff.append(self.pick_content.statusmsg, msgln)
-
-        
+        if msgln and time.time() - self.pick_content().statusmsg_time < 5:
+            buff.append(self.pick_content().statusmsg, msgln)
 
 class Kernel():
-    def __init__(self,rows,cols,conf):
+    def __init__(self,rows,cols):
         self.screen = Screen(rows,cols)
         self.start_time = time.time()
-        self.conf = conf
 
     def autosave(self):
         current = str(time.time())
@@ -482,7 +499,7 @@ class Kernel():
             if match:
                 self.screen.cy = i
                 self.screen.cx = self.row[i].render.find(query)
-                self.rowoff = current_content.numrows
+                self.screen.rowoff = current_content.numrows
                 break
 
     def open(self, filename):
@@ -493,118 +510,112 @@ class Kernel():
                 row = fichier.readline()
                 while (len(row) >0 and row != 'EOF'):
                     self.screen.edit.insert_row(row[:len(row)-1], self.screen.edit.numrows) 
-                    row = readline()
+                    row = fichier.readline()
             fichier.close()
         self.screen.edit.dirty = 0
 
-
-class Keyboard():
-    @staticmethod
-    def read_key():
-        try:
-            c = sys.stdin.read(1)
-        except OSError as err:
-            if err.errno == errno.EAGAIN:
-                print("ERROR" + err.errno)
-                sys.stdout.write('\x1b[2J')
-                sys.stdout.write('\x1b[H')
-                sys.exit()
-            else:
-                raise
-
-        if c == "\x1b":
-            try:
-                seq = sys.stdin.read(2)
-                if seq[0] == '[':
-                    temp = seq[1]
-                    if (ord(temp) >= ord('0') and ord(temp) <= ord('9')):
-                        if seq[2] == '~':
-                            if temp == '5':
-                                return PAGE_UP
-                            elif temp == '6':
-                                return PAGE_DOWN
-                            elif temp == '3':
-                                return DEL_KEY
-                    elif temp == 'A':
-                        return ARROW_UP
-                    elif temp == 'B':
-                        return ARROW_DOWN
-                    elif temp == 'C':
-                        log("reading the ARROW_RIGHT")
-                        return ARROW_RIGHT
-                    elif temp == 'D':
-                        return ARROW_LEFT
-            except (OSError, IndexError) as err:
-                return 0x1b
-            return 0x1b
-        log("just before this")
-        log(c)
-        if c == "\r":
-            return ENTER
-        return c
-    
-
-    # UPDATE THIS METHOD
-    @staticmethod
-    def process_keypress(e):
-        c = Keyboard.read_key()
+    def process_keypress(self):
+        c = read_key()
         log("a key is pressed!")
         while c == '':
             log("am i in the while? yes!")
-            c = Keyboard.read_key()
+            c = read_key()
         log("key pressed: ")
         log(c)
-        if c == Keyboard.ctrl('d'):
-            e.change_mode()
-        if e.mode_editor == 1:
+        if c == ctrl('d'):
+            self.screen.change_mode()
+        if self.screen.current_mode == MODE_DIR:
             if (c == ARROW_UP or c == ARROW_DOWN):
-                Keyboard.move_cursor(c, e)
+                self.screen.move_cursor(c)
             elif c == ENTER:
-                e.save()
-                e.open(e.dir[e.dir_cy])
-                e.mode_editor = 0
+                self.save()
+                log('screen.dir.dir')
+                log(self.screen.dir.dir)
+                self.open(self.screen.dir.dir[self.screen.dir.cy])
+                self.current_mode = MODE_EDIT
 
-        elif e.mode_editor == 0:
-            if c == Keyboard.ctrl('q'):
-                if e.dirty > 0 and e.quit_times > 0:
+        elif self.screen.current_mode == MODE_EDIT:
+            if c == ctrl('q'):
+                if self.screen.edit.dirty > 0 and self.screen.edit.quit_times > 0:
                     errorquit = "Attention! Le fichier comporte des changements qui n'ont pas été sauvegardés." +  \
                                 "Appuyez sur Ctrl-Q " + \
-                                str(e.quit_times) + \
+                                str(self.screen.edit.quit_times) + \
                         " fois pour quitter tout de même."
-                    e.set_status_message(errorquit)
-                    e.quit_times -= 1
+                    self.screen.edit.set_status_message(errorquit)
+                    self.screen.edit.quit_times -= 1
                     return
                 sys.stdout.write('\x1b[2J')
                 sys.stdout.write('\x1b[H')
-                Config.disableRawMode(e)
+                self.screen.disable_raw_mode()
                 sys.exit()
-            elif c == Keyboard.ctrl('s'):
-                e.save()
-            elif c == Keyboard.ctrl('f'):
-                e.find()
+            elif c == ctrl('s'):
+                self.save()
+            elif c == ctrl('f'):
+                self.find()
             elif c == ENTER:
                 log("enter key pressed? yes!")
-                e.insert_new_line()
+                self.screen.edit.insert_new_line()
             elif c == BACKSPACE or c == DEL_KEY:
-                e.del_char()
+                self.screen.edit.del_char()
             elif (c == PAGE_UP or c == PAGE_DOWN):
                 if c == PAGE_UP:
-                    e.cy = e.rowoff
+                    self.screen.edit.cy = self.screen.rowoff
                 elif c == PAGE_DOWN:
-                    e.cy = e.rowoff + e.screenrows - 1
-                    if e.cy > e.numrows:
-                        e.cy = e.numrows
-                times = e.screenrows
+                    self.screen.edit.cy = self.screen.rowoff + self.screen.screenrows - 1
+                    if self.screen.edit.cy > self.screen.edit.numrows:
+                        self.screen.edit.cy = self.screen.edit.numrows
+                times = self.screen.screenrows
                 while (times):
-                    Keyboard.move_cursor(ARROW_UP if PAGE_UP else PAGE_DOWN, e)
+                    self.screen.move_cursor(ARROW_UP if PAGE_UP else PAGE_DOWN)
                     times -= times
             elif (c == ARROW_DOWN or c == ARROW_UP or c == ARROW_LEFT or c == ARROW_RIGHT):
-                Keyboard.move_cursor(c, e)
+                self.screen.move_cursor(c)
             else:
-                e.insert_char(c)
-            e.quit_times = APEIRON_QUIT_TIMES
+                self.screen.edit.insert_char(c)
+            self.screen.edit.quit_times = APEIRON_QUIT_TIMES
 
+def read_key():
+    try:
+        c = sys.stdin.read(1)
+    except OSError as err:
+        if err.errno == errno.EAGAIN:
+            print("ERROR" + err.errno)
+            sys.stdout.write('\x1b[2J')
+            sys.stdout.write('\x1b[H')
+            sys.exit()
+        else:
+            raise
 
+    if c == "\x1b":
+        try:
+            seq = sys.stdin.read(2)
+            if seq[0] == '[':
+                temp = seq[1]
+                if (ord(temp) >= ord('0') and ord(temp) <= ord('9')):
+                    if seq[2] == '~':
+                        if temp == '5':
+                            return PAGE_UP
+                        elif temp == '6':
+                            return PAGE_DOWN
+                        elif temp == '3':
+                            return DEL_KEY
+                elif temp == 'A':
+                    return ARROW_UP
+                elif temp == 'B':
+                    return ARROW_DOWN
+                elif temp == 'C':
+                    log("reading the ARROW_RIGHT")
+                    return ARROW_RIGHT
+                elif temp == 'D':
+                    return ARROW_LEFT
+        except (OSError, IndexError) as err:
+            return 0x1b
+        return 0x1b
+    log("just before this")
+    log(c)
+    if c == "\r":
+        return ENTER
+    return c
 
 def get_window_size():
     return (struct.unpack('hh', fcntl.ioctl(sys.stdout.fileno(), termios.TIOCGWINSZ, '1234')))
@@ -620,11 +631,26 @@ if __name__ == "__main__":
     try:
         logfile = open("log.txt", 'a')
         log("This is a new session!")
-        conf = Config()
-        conf.enable_raw_mode()
+        # ## Config class is archived into Screen class
+        # conf = Config()
+        # conf.enable_raw_mode()
         hw = get_window_size()
         krnl = Kernel(hw[0],hw[1])
+        krnl.screen.enable_raw_mode()
+     
+        if len(sys.argv) >= 2:
+            print(sys.argv[1])
+            krnl.screen.filename = sys.argv[1]
+            krnl.open(sys.argv[1])
+
+        krnl.screen.edit.set_status_message(
+            DEFAULT_STATUS_MSG)
+
+        while True:
+            krnl.screen.refresh()
+            krnl.process_keypress()
+            krnl.autosave()
         
     except:
-        conf.disable_raw_mode()
+        krnl.screen.disable_raw_mode()
         raise
